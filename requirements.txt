@@ -14,6 +14,7 @@ regionmask==0.13.0
 # Modeling
 codecarbon==3.2.6
 ollama==0.6.2
+pycountry-convert==0.7.2
 
 # Evaluation
 scikit-learn==1.6.1
