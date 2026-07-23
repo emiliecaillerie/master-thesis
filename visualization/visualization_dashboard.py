@@ -17,10 +17,10 @@ df['Year'] = pd.to_numeric(df['Year'], errors='coerce').astype(int)
 df['Coverage'] = pd.to_numeric(df['Coverage'], errors='coerce').fillna(0.0)
 df['Intensity'] = pd.to_numeric(df['Intensity'], errors='coerce')
 
-df_hazards = sorted(df['Hazard'].unique())
-df_countries = sorted(df['Country'].unique())
 country_names = dict(zip(df['Country'], df['Country_name']))
 hazard_names = dict(zip(df['Hazard'], df['Hazard_name']))
+df_hazards = sorted(df['Hazard'].unique())
+df_countries = sorted(df['Country'].unique(), key=lambda c: country_names[c])
 
 # Set default values for the initial state of the dashboard
 DEFAULT_HAZARD = 'temperature_extremes'
@@ -55,12 +55,18 @@ def make_map(hazard):
                         animation_frame='Year', color_continuous_scale='RdYlGn_r', range_color=[-1.0, 1.0],
                         title=f"Map of Policy Gap for {hazard_names.get(hazard, hazard)}")
     fig.update_layout(height=550)
+    fig.update_geos(showocean=True, oceancolor='lightblue', showlakes=True, lakecolor='lightblue')
     return fig
 
 
 ########################################
 # Timeline
 ########################################
+def symmetric_range(series):
+        m = series.abs().max()
+        m = m * 1.1 if pd.notna(m) and m > 0 else 1
+        return [-m, m]
+    
 def make_timeline(country, hazard):
     sub = df[(df['Country'] == country) & (df['Hazard'] == hazard)].sort_values('Year')
     fig = go.Figure()
@@ -68,12 +74,21 @@ def make_timeline(country, hazard):
                              mode='lines+markers', line=dict(color='green'), yaxis='y1'))
     fig.add_trace(go.Scatter(x=sub['Year'], y=sub['Intensity'], name='Intensity',
                              mode='lines+markers', line=dict(color='red'), yaxis='y2'))
+    
+    coverage_range = symmetric_range(sub['Coverage'])
+    intensity_range = symmetric_range(sub['Intensity'])
+    coverage_ticks = np.linspace(coverage_range[0], coverage_range[1], 7)
+    intensity_ticks = np.linspace(intensity_range[0], intensity_range[1], 7)
     fig.update_layout(height=450,
         title=f"Timeline of Legislative Coverage and Hazard Intensity<br>for {hazard_names.get(hazard, hazard)} in {country_names.get(country, country)}",
-        xaxis=dict(title='Year'),
-        yaxis=dict(title=dict(text='Coverage', font=dict(color='green')), tickfont=dict(color='green')),
+        xaxis=dict(title='Year', fixedrange=True),
+        yaxis=dict(title=dict(text='Coverage', font=dict(color='green')), tickfont=dict(color='green'),
+                   range=coverage_range, tickmode='array', tickvals=coverage_ticks, 
+                   ticktext=np.round(coverage_ticks).astype(int), fixedrange=True),
         yaxis2=dict(title=dict(text='Intensity', font=dict(color='red')), tickfont=dict(color='red'),
-                     overlaying='y', side='right'),
+                     overlaying='y', side='right', range=intensity_range, tickmode='array', 
+                     tickvals=intensity_ticks, ticktext=np.round(intensity_ticks, 2), showgrid=False,
+                     fixedrange=True),
         legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='right', x=1))
     return fig
 
@@ -81,7 +96,8 @@ def make_gap_timeline(country, hazard):
     sub = df[(df['Country'] == country) & (df['Hazard'] == hazard)].sort_values('Year')
     fig = px.line(sub, x='Year', y='Gap', markers=True,
                   title=f"Timeline of Policy Gap<br>for {hazard_names.get(hazard, hazard)} in {country_names.get(country, country)}")
-    fig.update_layout(height=450, yaxis_title='Gap (NIntensity - NCoverage)', yaxis_range=[-1.05, 1.05])
+    fig.update_layout(height=450, yaxis_title='Gap', yaxis_range=[-1.05, 1.05],
+                      xaxis=dict(fixedrange=True), yaxis=dict(fixedrange=True))
     fig.add_hline(y=0, line_dash='dash', line_color='gray')
     return fig
 
@@ -94,8 +110,9 @@ def make_bar(country):
     fig = px.bar(sub, x='Hazard_name', y='Gap', color='Gap', color_continuous_scale='RdYlGn_r', 
                  range_color=[-1.0, 1.0], animation_frame='Year',
                  title=f"Bar Chart of Policy Gap by Hazard in {country_names.get(country, country)}")
-    fig.update_layout(height=500, xaxis_title='Hazard', yaxis_title='Gap (NIntensity - NCoverage)',
-                      yaxis_range=[-1.05, 1.05], xaxis=dict(categoryorder='array', categoryarray=HAZARD_LABEL_ORDER))
+    fig.update_layout(height=500, xaxis_title='Hazard', yaxis_title='Gap',
+                      yaxis_range=[-1.05, 1.05], xaxis=dict(categoryorder='array', categoryarray=HAZARD_LABEL_ORDER,
+                      fixedrange=True), yaxis=dict(fixedrange=True))
     return fig
 
 
@@ -105,10 +122,11 @@ def make_bar(country):
 def make_scatter(hazard):
     sub = df[df['Hazard'] == hazard].dropna(subset=['NIntensity', 'NCoverage', 'Continent_name']).sort_values('Year')
     fig = px.scatter(sub, x='NIntensity', y='NCoverage', color='Continent_name', 
-                     hover_name='Country_name', animation_frame='Year',
+                     hover_name='Country_name', animation_frame='Year', labels={'Continent_name': 'Continent'},
                      title=f"Scatter Plot of Countries' Coverage and Intensity for {hazard_names.get(hazard, hazard)}")
     fig.add_shape(type='line', x0=0, y0=0, x1=1, y1=1, line=dict(dash='dash', color='gray'))
-    fig.update_layout(height=550, xaxis_range=[-0.05, 1.05], yaxis_range=[-0.05, 1.05])
+    fig.update_layout(height=550, xaxis_range=[-0.05, 1.05], yaxis_range=[-0.05, 1.05],
+                      xaxis=dict(fixedrange=True), yaxis=dict(fixedrange=True))
     return fig
 
 
@@ -126,11 +144,18 @@ app.layout = html.Div(style={'fontFamily': 'Arial, sans-serif', 'margin': '20px'
     # Title
     html.H1("Visualization Dashboard"),
     
+    # Source
+    html.H3("Data Sources:"), 
+    html.P([html.A(href="https://climate-laws.org/", target="_blank", children="Climate Change Laws of the World"), 
+           " and ", html.A(href="https://climatepolicydatabase.org/policies", target="_blank", children="Climate Policy Database"),
+            " for legislative data, ", html.A(href="https://cds.climate.copernicus.eu/datasets", target="_blank", children="Climate Data Store"),
+            " for sensor data"]),
+    
     # Definitions
     html.H3("Definitions:"),
     html.P("Legislative Coverage = the cumulative count of laws per country per hazard category per year"),
     html.P("Hazard Intensity =  the deviation of the climate variable associated with each hazard category, relative to a historical baseline period"),
-    html.P("Policy Gap = the difference between normalized hazard intensity and normalized legislative coverage"),
+    html.P("Policy Gap = (Normalized hazard intensity) - (Normalized legislative coverage)"),
 
     # Hazard and country slicers
     html.Div(style={'marginBottom': '20px'}, children=[
