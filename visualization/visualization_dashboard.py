@@ -7,7 +7,6 @@ import plotly.express as px
 import plotly.graph_objects as go
 from dash import Dash, dcc, html, Input, Output
 
-
 ########################################
 # Load and clean data
 ########################################
@@ -42,7 +41,7 @@ def normalize(var):
 df['NCoverage'] = df.groupby('Hazard')['Coverage'].transform(normalize)
 df['NIntensity'] = df.groupby('Hazard')['Intensity'].transform(normalize)
 
-df['Gap'] = df['NIntensity'] - df['NCoverage']
+df['Gap'] = df['NCoverage'] - df['NIntensity']
 df.loc[df['Intensity'].isna(), ['NIntensity', 'Gap']] = np.nan
 
 
@@ -52,7 +51,7 @@ df.loc[df['Intensity'].isna(), ['NIntensity', 'Gap']] = np.nan
 def make_map(hazard):
     sub = df[df['Hazard'] == hazard].dropna(subset=['Gap']).sort_values('Year')
     fig = px.choropleth(sub, locations='Country', color='Gap', hover_name='Country_name',
-                        animation_frame='Year', color_continuous_scale='RdYlGn_r', range_color=[-1.0, 1.0],
+                        animation_frame='Year', color_continuous_scale='RdYlGn', range_color=[-1.0, 1.0],
                         title=f"Map of Policy Gap for {hazard_names.get(hazard, hazard)}")
     fig.update_layout(height=550)
     fig.update_geos(showocean=True, oceancolor='lightblue', showlakes=True, lakecolor='lightblue')
@@ -98,7 +97,8 @@ def make_gap_timeline(country, hazard):
                   title=f"Timeline of Policy Gap<br>for {hazard_names.get(hazard, hazard)} in {country_names.get(country, country)}")
     fig.update_layout(height=450, yaxis_title='Gap', yaxis_range=[-1.05, 1.05],
                       xaxis=dict(fixedrange=True), yaxis=dict(fixedrange=True))
-    fig.add_hline(y=0, line_dash='dash', line_color='gray')
+    fig.update_traces(line_color='gold', marker_color='gold')
+    fig.add_hline(y=0, line_dash='dash', line_color='grey')
     return fig
 
 
@@ -107,7 +107,7 @@ def make_gap_timeline(country, hazard):
 ########################################
 def make_bar(country):
     sub = df[df['Country'] == country].sort_values('Year')
-    fig = px.bar(sub, x='Hazard_name', y='Gap', color='Gap', color_continuous_scale='RdYlGn_r', 
+    fig = px.bar(sub, x='Hazard_name', y='Gap', color='Gap', color_continuous_scale='RdYlGn', 
                  range_color=[-1.0, 1.0], animation_frame='Year',
                  title=f"Bar Chart of Policy Gap by Hazard in {country_names.get(country, country)}")
     fig.update_layout(height=500, xaxis_title='Hazard', yaxis_title='Gap',
@@ -120,11 +120,15 @@ def make_bar(country):
 # Scatter plot
 ########################################
 def make_scatter(hazard):
-    sub = df[df['Hazard'] == hazard].dropna(subset=['NIntensity', 'NCoverage', 'Continent_name']).sort_values('Year')
-    fig = px.scatter(sub, x='NIntensity', y='NCoverage', color='Continent_name', 
-                     hover_name='Country_name', animation_frame='Year', labels={'Continent_name': 'Continent'},
+    sub = df[df['Hazard'] == hazard].dropna(subset=['NIntensity', 'NCoverage', 'Continent_name', 'Gap']).sort_values('Year')
+    fig = px.scatter(sub, x='NIntensity', y='NCoverage', color='Gap', size=sub['Gap'].abs(),
+                     hover_name='Country_name', hover_data={'Continent_name': True}, animation_frame='Year',
+                     color_continuous_scale='RdYlGn', range_color=[-1.0, 1.0],
+                     labels={'NIntensity': 'Normalized intensity', 'NCoverage': 'Normalized coverage',
+                             'Continent_name': 'Continent'},
                      title=f"Scatter Plot of Countries' Coverage and Intensity for {hazard_names.get(hazard, hazard)}")
-    fig.add_shape(type='line', x0=0, y0=0, x1=1, y1=1, line=dict(dash='dash', color='gray'))
+ 
+    fig.add_shape(type='line', x0=0, y0=0, x1=1, y1=1, line=dict(dash='dash', color='black'))
     fig.update_layout(height=550, xaxis_range=[-0.05, 1.05], yaxis_range=[-0.05, 1.05],
                       xaxis=dict(fixedrange=True), yaxis=dict(fixedrange=True))
     return fig
@@ -147,15 +151,15 @@ app.layout = html.Div(style={'fontFamily': 'Arial, sans-serif', 'margin': '20px'
     # Source
     html.H3("Data Sources:"), 
     html.P([html.A(href="https://climate-laws.org/", target="_blank", children="Climate Change Laws of the World"), 
-           " and ", html.A(href="https://climatepolicydatabase.org/policies", target="_blank", children="Climate Policy Database"),
-            " for legislative data, ", html.A(href="https://cds.climate.copernicus.eu/datasets", target="_blank", children="Climate Data Store"),
-            " for sensor data"]),
+           " (Apr. 2026) and ", html.A(href="https://climatepolicydatabase.org/policies", target="_blank", children="Climate Policy Database"),
+            " (Apr. 2026) for legislative data, ", html.A(href="https://cds.climate.copernicus.eu/datasets", target="_blank", children="Climate Data Store"),
+            " (May 2026) for sensor data"]),
     
     # Definitions
     html.H3("Definitions:"),
     html.P("Legislative Coverage = the cumulative count of laws per country per hazard category per year"),
     html.P("Hazard Intensity =  the deviation of the climate variable associated with each hazard category, relative to a historical baseline period"),
-    html.P("Policy Gap = (Normalized hazard intensity) - (Normalized legislative coverage)"),
+    html.P("Policy Gap = (Normalized legislative coverage) - (Normalized hazard intensity)"),
 
     # Hazard and country slicers
     html.Div(style={'marginBottom': '20px'}, children=[
@@ -185,6 +189,12 @@ app.layout = html.Div(style={'fontFamily': 'Arial, sans-serif', 'margin': '20px'
         html.Div(dcc.Graph(id='bar-graph', config=graph_config), style={'flex': 1, 'minWidth': 0}),
         html.Div(dcc.Graph(id='scatter-graph', config=graph_config), style={'flex': 1, 'minWidth': 0}),
     ]),
+    
+    # Source
+    html.P(["Data Sources: ", html.A(href="https://climate-laws.org/", target="_blank", children="Climate Change Laws of the World"), 
+           " (Apr. 2026) and ", html.A(href="https://climatepolicydatabase.org/policies", target="_blank", children="Climate Policy Database"),
+            " (Apr. 2026) for legislative data, ", html.A(href="https://cds.climate.copernicus.eu/datasets", target="_blank", children="Climate Data Store"),
+            " (May 2026) for sensor data"])
 ])
 
 
