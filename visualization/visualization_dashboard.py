@@ -44,6 +44,32 @@ df['NIntensity'] = df.groupby('Hazard')['Intensity'].transform(normalize)
 df['Gap'] = df['NCoverage'] - df['NIntensity']
 df.loc[df['Intensity'].isna(), ['NIntensity', 'Gap']] = np.nan
 
+df['Rho'] = pd.to_numeric(df['Rho'], errors='coerce')
+
+
+########################################
+# Key figures as of 2023
+########################################
+YEAR = 2023
+_latest = df[df['Year'] == YEAR].dropna(subset=['Gap'])
+
+# Country and hazard counts 
+NUM_COUNTRIES = len(df_countries)
+NUM_HAZARDS = len(df_hazards)
+ 
+# Percentage of country underlegislated
+_country_avg_gap = _latest.groupby('Country')['Gap'].mean()
+UNDER_LEGISLATED = round((_country_avg_gap < 0).mean() * 100, 1)
+ 
+# Hazard with the most negative gap
+_hazard_avg_gap = _latest.groupby('Hazard')['Gap'].mean()
+WORST_HAZARD = _hazard_avg_gap.idxmin()
+WORST_HAZARD_NAME = hazard_names.get(WORST_HAZARD, WORST_HAZARD)
+
+# Global average gap evolution
+GAP_2000 = round(df[df['Year'] == 2000].dropna(subset=['Gap'])['Gap'].mean(), 2)
+GAP_2023 = round(df[df['Year'] == 2023].dropna(subset=['Gap'])['Gap'].mean(), 2)
+GAP_DIFF = round(GAP_2023 - GAP_2000, 2)
 
 ########################################
 # Map
@@ -135,9 +161,64 @@ def make_scatter(hazard):
 
 
 ########################################
+# Synthesis sentence
+########################################
+def make_synthesis(country, hazard):
+    sub = df[(df['Country'] == country) & (df['Hazard'] == hazard)].sort_values('Year')
+    sub_with_gap = sub.dropna(subset=['Gap'])
+ 
+    country_label = country_names.get(country, country)
+    hazard_label = hazard_names.get(hazard, hazard)
+ 
+    if sub_with_gap.empty:
+        return (f"No hazard intensity data is available for {hazard_label} in {country_label}.")
+ 
+    latest = sub_with_gap.iloc[-1] 
+    year_now = int(latest['Year'])
+    coverage_now, intensity_now, gap_now = latest['Coverage'], latest['Intensity'], latest['Gap']
+
+    gap_direction = ("enough laws are in place relative to the observed risk"
+                      if gap_now >= 0 else
+                      "not enough laws are in place relative to the observed risk")
+ 
+    return (f"For {hazard_label} in {country_label}, as of {year_now}, legislative coverage stands at "
+            f"{coverage_now:.0f} law(s) against a hazard intensity of {intensity_now:.2f} "
+            f"(relative to baseline), giving a policy gap of {gap_now:+.2f}, meaning {gap_direction}.")
+
+
+########################################
 # Dashboard layout
 ########################################
 app = Dash(__name__)
+
+app.index_string = '''
+<!DOCTYPE html>
+<html>
+    <head>
+        {%metas%}
+        <title>{%title%}</title>
+        {%favicon%}
+        {%css%}
+        <style>
+            html { scroll-behavior: smooth; }
+            .scroll-badge {position: fixed; bottom: 24px; left: 24px; width: 60px; height: 60px;
+                border-radius: 50%; border: 1px solid #ccc; background: white;
+                box-shadow: 0 2px 6px rgba(0,0,0,0.1); display: flex; flex-direction: column;
+                align-items: center; justify-content: center; z-index: 1000;}
+            .scroll-badge-text {font-size: 8px; font-weight: bold; letter-spacing: 1px;
+                color: #333; margin-bottom: 6px;}
+        </style>
+    </head>
+    <body>
+        {%app_entry%}
+        <footer>
+            {%config%}
+            {%scripts%}
+            {%renderer%}
+        </footer>
+    </body>
+</html>
+'''
 
 hazard_options = [{'label': hazard_names.get(h, h), 'value': h} for h in df_hazards]
 country_options = [{'label': country_names.get(c, c), 'value': c} for c in df_countries]
@@ -145,9 +226,19 @@ country_options = [{'label': country_names.get(c, c), 'value': c} for c in df_co
 graph_config = {'responsive': True}
 
 app.layout = html.Div(style={'fontFamily': 'Arial, sans-serif', 'margin': '20px'}, children=[
+    # Scroll arrow
+    html.Div(className="scroll-badge", children=[
+        html.Div("SCROLL", className="scroll-badge-text"),
+        html.Img(src="data:image/svg+xml;utf8," + 
+                 "<svg xmlns='http://www.w3.org/2000/svg' width='15' height='9' viewBox='0 0 28 16'>"
+                 "<polyline points='2,2 14,14 26,2' fill='none' stroke='%23333' stroke-width='3' "
+                 "stroke-linecap='round' stroke-linejoin='round'/></svg>"),
+    ]),
+    
     # Title
     html.H1("Visualization Dashboard"),
-    
+    html.Hr(style={'marginBottom': '24px'}),
+ 
     # Source
     html.H3("Data Sources:"), 
     html.P([html.A(href="https://climate-laws.org/", target="_blank", children="Climate Change Laws of the World"), 
@@ -157,9 +248,26 @@ app.layout = html.Div(style={'fontFamily': 'Arial, sans-serif', 'margin': '20px'
     
     # Definitions
     html.H3("Definitions:"),
-    html.P("Legislative Coverage = the cumulative count of laws per country per hazard category per year"),
-    html.P("Hazard Intensity =  the deviation of the climate variable associated with each hazard category, relative to a historical baseline period"),
-    html.P("Policy Gap = (Normalized legislative coverage) - (Normalized hazard intensity)"),
+    html.P([html.B("Legislative Coverage"), " = the cumulative count of laws per country per hazard category per year"]),
+    html.P([html.B("Hazard Intensity"), " = the deviation of the climate variable associated with each hazard category, relative to a historical baseline period"]),
+    html.P([html.B("Policy Gap"), " = (Normalized legislative coverage) - (Normalized hazard intensity)"]),
+    html.Hr(style={'marginBottom': '24px'}),
+    
+    # Key figures  
+    html.Div(style={'display': 'flex', 'marginBottom': '24px', 'flexWrap': 'wrap'}, children=[
+        html.Div(style={'flex': '1', 'minWidth': '180px', 'padding': '0 20px', 'textAlign': 'center', 'borderRight': '1px solid #ccc'}, 
+                 children=[html.Div(f"{NUM_COUNTRIES}", style={'fontSize': '20px', 'fontWeight': 'bold'}),
+                           html.Div(f"countries represented", style={'fontSize': '13px', 'color': '#555'})]),
+        html.Div(style={'flex': '1', 'minWidth': '180px', 'padding': '0 20px', 'textAlign': 'center', 'borderRight': '1px solid #ccc'}, 
+                 children=[html.Div(f"{NUM_HAZARDS}", style={'fontSize': '20px', 'fontWeight': 'bold'}),
+                           html.Div(f"climate hazards analyzed", style={'fontSize': '13px', 'color': '#555'})]),
+        html.Div(style={'flex': '1', 'minWidth': '180px', 'padding': '0 20px', 'textAlign': 'center', 'borderRight': '1px solid #ccc'}, 
+                 children=[html.Div(f"{UNDER_LEGISLATED}%", style={'fontSize': '20px', 'fontWeight': 'bold'}),
+                           html.Div(f"of countries are under-legislated on average across hazards ({YEAR})", style={'fontSize': '13px', 'color': '#555'})]),
+        html.Div(style={'flex': '1', 'minWidth': '180px', 'padding': '0 20px', 'textAlign': 'center', 'borderRight': '1px solid #ccc'}, 
+                 children=[html.Div(f"+{GAP_DIFF}", style={'fontSize': '20px', 'fontWeight': 'bold'}),
+                           html.Div(f"narrowing in the average policy gap (from {GAP_2000} in 2000 to {GAP_2023} in 2023)", style={'fontSize': '13px', 'color': '#555'})])]),
+    html.Hr(style={'marginBottom': '24px'}),
 
     # Hazard and country slicers
     html.Div(style={'marginBottom': '20px'}, children=[
@@ -189,6 +297,10 @@ app.layout = html.Div(style={'fontFamily': 'Arial, sans-serif', 'margin': '20px'
         html.Div(dcc.Graph(id='bar-graph', config=graph_config), style={'flex': 1, 'minWidth': 0}),
         html.Div(dcc.Graph(id='scatter-graph', config=graph_config), style={'flex': 1, 'minWidth': 0}),
     ]),
+    
+    # Synthesis
+    html.P(id='synthesis-text', style={'fontSize': '15px', 'textAlign': 'center'}),
+    html.Hr(style={'marginBottom': '24px'}),
     
     # Source
     html.P(["Data Sources: ", html.A(href="https://climate-laws.org/", target="_blank", children="Climate Change Laws of the World"), 
@@ -226,6 +338,15 @@ def update_country_driven_charts(country):
 )
 def update_timeline_charts(country, hazard):
     return make_timeline(country, hazard), make_gap_timeline(country, hazard)
+
+
+@app.callback(
+    Output('synthesis-text', 'children'),
+    Input('country-dropdown', 'value'),
+    Input('hazard-dropdown', 'value'),
+)
+def update_synthesis(country, hazard):
+    return make_synthesis(country, hazard)
 
 
 if __name__ == '__main__':
