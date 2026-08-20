@@ -1,8 +1,19 @@
 # Ignore environment files
 .env
 
-# Ignore data folders
-data/
+# Ignore data/ files that will be generated and not central in the study
+law/data/*
+!law/data/README.md
+!law/data/benchmark.csv
+!law/data/CCLW-27-04-2026.csv
+!law/data/CPDB-21-04-2026.csv
+!law/data/law_classified.csv
+!law/data/law.csv
+sensor/data/*
+!sensor/data/README.md
+!sensor/data/*.csv
 
-# Ignore output folders
-outputs/
+# Ignore output files that will be generated and not central in the study
+law/outputs/*
+sensor/outputs/*
+visualization/outputs/*.png
